@@ -29,13 +29,20 @@ Most configuration can be done through environment variables
 #### Master
 
 ```
-docker run -e RENDER_MODE=MASTER -p 8000:8000 -it --rm grimkriegor/blender-netrender:2.79
+docker run \
+  -it --rm \
+  -e RENDER_MODE=MASTER \
+  -p 8000:8000 \
+  grimkriegor/blender-netrender:2.79
 ```
 
 #### Slave
 
 ```
-docker run -e MASTER_IP="render.domain.net" -it --rm grimkriegor/blender-netrender:2.79
+docker run \
+  -it --rm \
+  -e MASTER_IP="render.domain.net" \
+  grimkriegor/blender-netrender:2.79
 ```
 
 
