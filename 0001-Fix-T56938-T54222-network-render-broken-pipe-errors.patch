@@ -1,0 +1,120 @@
+From f975292b1ec103826fe244dfdb851fed0428b624 Mon Sep 17 00:00:00 2001
+From: Brecht Van Lommel <brechtvanlommel@gmail.com>
+Date: Thu, 27 Sep 2018 16:18:33 +0200
+Subject: [PATCH] Fix T56938, T54222: network render broken pipe errors.
+
+Always put content-length in the header when sending files now. Also
+deduplicates file sending code into one function.
+
+Patch by A K (campino).
+
+Differential Revision: https://developer.blender.org/D3741
+---
+ netrender/client.py | 20 ++++----------------
+ netrender/slave.py  | 21 +++++----------------
+ netrender/utils.py  | 10 ++++++++++
+ 3 files changed, 19 insertions(+), 32 deletions(-)
+
+diff --git a/netrender/client.py b/netrender/client.py
+index 8c5499b6..6c11e82a 100644
+--- a/netrender/client.py
++++ b/netrender/client.py
+@@ -243,14 +243,8 @@ def sendJobBaking(conn, scene, can_save = True):
+     # if not ACCEPTED (but not processed), send files
+     if response.status == http.client.ACCEPTED:
+         for rfile in job.files:
+-            f = open(rfile.filepath, "rb")
+-            with ConnectionContext():
+-                conn.request("PUT", fileURL(job_id, rfile.index), f)
+-            f.close()
+-            response = conn.getresponse()
+-            response.read()
+-
+-    # server will reply with ACCEPTED until all files are found
++            sendFile(conn, fileURL(job_id, rfile.index), rfile.filepath)
++            # server will reply with ACCEPTED until all files are found
+ 
+     return job_id
+ 
+@@ -333,14 +327,8 @@ def sendJobBlender(conn, scene, anim = False, can_save = True):
+     # if not ACCEPTED (but not processed), send files
+     if response.status == http.client.ACCEPTED:
+         for rfile in job.files:
+-            f = open(rfile.filepath, "rb")
+-            with ConnectionContext():
+-                conn.request("PUT", fileURL(job_id, rfile.index), f)
+-            f.close()
+-            response = conn.getresponse()
+-            response.read()
+-
+-    # server will reply with ACCEPTED until all files are found
++            sendFile(conn, fileURL(job_id, rfile.index), rfile.filepath)
++            # server will reply with ACCEPTED until all files are found
+ 
+     return job_id
+ 
+diff --git a/netrender/slave.py b/netrender/slave.py
+index 3bb1578a..7788e471 100644
+--- a/netrender/slave.py
++++ b/netrender/slave.py
+@@ -377,19 +377,11 @@ def render_slave(engine, netsettings, threads):
+                             # thumbnail first
+                             if netsettings.use_slave_thumb:
+                                 thumbname = thumbnail.generate(filename)
+-
+                                 if thumbname:
+-                                    f = open(thumbname, 'rb')
+-                                    with ConnectionContext():
+-                                        conn.request("PUT", "/thumb", f, headers=headers)
+-                                    f.close()
+-                                    responseStatus(conn)
++                                    sendFile(conn, "/thumb", thumbname, headers=headers)
+ 
+-                            f = open(filename, 'rb')
+-                            with ConnectionContext():
+-                                conn.request("PUT", "/render", f, headers=headers)
+-                            f.close()
+-                            if responseStatus(conn) == http.client.NO_CONTENT:
++                            reponse_status = sendFile(conn, "/render", filename, headers=headers)
++                            if reponse_status == http.client.NO_CONTENT:
+                                 continue
+ 
+                         elif job.subtype == netrender.model.JOB_SUB_BAKING:
+@@ -402,11 +394,8 @@ def render_slave(engine, netsettings, threads):
+                                 headers["result-filename"] = result_filename
+                                 headers["job-finished"] = str(result_filepath == frame_results[-1])
+ 
+-                                f = open(result_filepath, 'rb')
+-                                with ConnectionContext():
+-                                    conn.request("PUT", "/result", f, headers=headers)
+-                                f.close()
+-                                if responseStatus(conn) == http.client.NO_CONTENT:
++                                response_status = sendFile(conn, "/result", result_filepath, headers=headers)
++                                if response_status == http.client.NO_CONTENT:
+                                     continue
+ 
+                         elif job.type == netrender.model.JOB_PROCESS:
+diff --git a/netrender/utils.py b/netrender/utils.py
+index 78d57487..367ac897 100644
+--- a/netrender/utils.py
++++ b/netrender/utils.py
+@@ -447,6 +447,16 @@ def getFileInfo(filepath, infos):
+     return values
+ 
+ 
++def sendFile(conn, url, filepath, headers={}):
++    file_size = os.path.getsize(filepath)
++    if not 'content-length' in headers:
++        headers['content-length'] = file_size
++    with open(filepath, "rb") as f:
++        with ConnectionContext():
++            conn.request("PUT", url, f, headers=headers)
++    return responseStatus(conn)
++
++
+ if __name__ == "__main__":
+     try:
+         start = sys.argv.index("--") + 1
+-- 
+2.28.0
+
